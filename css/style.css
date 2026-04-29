@@ -1450,6 +1450,48 @@ footer {
     font-weight: 600;
 }
 
+.sub-status-note {
+    margin: 12px 0 0;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.sub-invoices {
+    margin-top: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface2);
+    padding: 12px;
+}
+
+.sub-invoices-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+}
+
+.sub-invoices-head h4 {
+    margin: 0;
+    font-size: 0.95rem;
+}
+
+.sub-invoices-head span {
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+}
+
+.invoice-link {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(0, 229, 160, 0.45);
+}
+
+.invoice-link:hover {
+    border-bottom-color: var(--accent);
+}
+
 .history-table {
     width: 100%;
     border-collapse: collapse;

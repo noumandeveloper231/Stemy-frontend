@@ -1918,6 +1918,48 @@ function subscriptionStatusLabel(status) {
     return m[status] || status;
 }
 
+function formatMoney(cents, currency) {
+    if (typeof cents !== 'number') return '—';
+    const code = String(currency || 'usd').toUpperCase();
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: code }).format(cents / 100);
+}
+
+function daysUntil(dateLike) {
+    if (!dateLike) return null;
+    const target = new Date(dateLike);
+    if (Number.isNaN(target.getTime())) return null;
+    const diff = target.getTime() - Date.now();
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function renderInvoiceHistory(profileRoot, invoices) {
+    const tbody = profileRoot?.querySelector('#invoiceHistoryTable tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (!Array.isArray(invoices) || invoices.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No invoices yet</td></tr>';
+        return;
+    }
+
+    for (const inv of invoices) {
+        const tr = document.createElement('tr');
+        const created = inv?.created ? new Date(inv.created * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+        const periodEnd = inv?.periodEnd ? new Date(inv.periodEnd * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+        const amount = formatMoney(typeof inv.amountPaid === 'number' ? inv.amountPaid : inv.amountDue, inv.currency);
+        const view = inv?.hostedInvoiceUrl || inv?.invoicePdf
+            ? `<a class="invoice-link" href="${inv.hostedInvoiceUrl || inv.invoicePdf}" target="_blank" rel="noopener noreferrer">View</a>`
+            : '—';
+        tr.innerHTML = `
+            <td>${created}</td>
+            <td>${escapeHtml(subscriptionStatusLabel(String(inv.status || '').toUpperCase()))}</td>
+            <td>${amount}</td>
+            <td>${periodEnd}</td>
+            <td>${view}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+}
+
 function setTextIf(root, selector, text) {
     if (!root || text === undefined || text === null) return;
     const el = root.querySelector(selector);
@@ -1966,6 +2008,20 @@ async function populateProfile() {
         subscription = s2 ? JSON.parse(s2) : null;
     }
 
+    let invoices = [];
+    if (localStorage.getItem('esAuthToken')) {
+        try {
+            const details = await apiCall('/subscriptions/current');
+            if (details?.subscription) {
+                subscription = details.subscription;
+                localStorage.setItem('esSubscription', JSON.stringify(details.subscription));
+            }
+            if (Array.isArray(details?.invoices)) invoices = details.invoices;
+        } catch (_) {
+            invoices = [];
+        }
+    }
+
     const sidebar = profileRoot.querySelector('.profile-sidebar');
     const displayName = user?.displayName || [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || '—';
     const email = user?.email || '—';
@@ -1997,11 +2053,30 @@ async function populateProfile() {
             const end = subscription?.currentPeriodEnd || subscription?.trialEndsAt;
             vals[1].textContent = end ? new Date(end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
         }
-        if (vals[2]) vals[2].textContent = 'See account usage';
+        if (vals[2]) {
+            const end = subscription?.currentPeriodEnd || subscription?.trialEndsAt;
+            const daysLeft = daysUntil(end);
+            vals[2].textContent = typeof daysLeft === 'number'
+                ? `${Math.max(0, daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} left in current cycle`
+                : '—';
+        }
         if (vals[3] && user?.createdAt) {
             vals[3].textContent = new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
         }
+
+        const notice = subCard.querySelector('#subscriptionStatusNote');
+        if (notice) {
+            if (!hasBillableSubscription(subscription)) {
+                notice.textContent = 'No paid subscription is currently active.';
+            } else if (subscription?.status === 'CANCELED') {
+                notice.textContent = 'Your plan is canceled. Access remains until the period end date above.';
+            } else {
+                notice.textContent = 'Manage plan changes and cancellations in Stripe Billing Portal.';
+            }
+        }
     }
+
+    renderInvoiceHistory(profileRoot, invoices);
 
     const wb = document.getElementById('welcomeBanner');
     const wbName = document.getElementById('wbName');
@@ -2957,18 +3032,35 @@ function completePurchase() {
 
 function handleCheckoutReturn() {
     const p = new URLSearchParams(window.location.search);
-    if (p.get('checkout') === 'success') {
+    if (p.get('portal') === 'return') {
         refreshSession().then(() => {
-            showToast('Subscription updated');
+            showToast('Subscription synced from billing portal');
+            showPage('profile');
             const pr = document.getElementById('page-profile');
             if (pr) void populateProfile();
         });
-        window.history.replaceState({}, '', window.location.pathname);
+        p.delete('portal');
+        const next = `${window.location.pathname}${p.toString() ? `?${p.toString()}` : ''}`;
+        window.history.replaceState({}, '', next);
+        return;
+    }
+    if (p.get('checkout') === 'success') {
+        refreshSession().then(() => {
+            showToast('Subscription updated');
+            showPage('profile');
+            const pr = document.getElementById('page-profile');
+            if (pr) void populateProfile();
+        });
+        p.delete('checkout');
+        const next = `${window.location.pathname}${p.toString() ? `?${p.toString()}` : ''}`;
+        window.history.replaceState({}, '', next);
         return;
     }
     if (p.get('checkout') === 'cancel') {
         showToast('Checkout canceled');
-        window.history.replaceState({}, '', window.location.pathname);
+        p.delete('checkout');
+        const next = `${window.location.pathname}${p.toString() ? `?${p.toString()}` : ''}`;
+        window.history.replaceState({}, '', next);
     }
 }
 

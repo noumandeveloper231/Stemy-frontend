@@ -1660,8 +1660,8 @@
                                     <div class="sub-detail-val">May 14, 2026</div>
                                 </div>
                                 <div class="sub-detail">
-                                    <div class="sub-detail-label">Masters Used</div>
-                                    <div class="sub-detail-val">Unlimited ✓</div>
+                                    <div class="sub-detail-label">Cycle Remaining</div>
+                                    <div class="sub-detail-val">—</div>
                                 </div>
                                 <div class="sub-detail">
                                     <div class="sub-detail-label">Member Since</div>
@@ -1673,6 +1673,30 @@
                                     Label</button>
                                 <button type="button" class="btn btn-ghost" style="color:var(--warn)" onclick="openBillingPortal()">Cancel Plan</button>
                             </div>
+                            <p id="subscriptionStatusNote" class="sub-status-note">Manage plan changes and cancellations in Stripe Billing Portal.</p>
+                        </div>
+
+                        <div class="sub-invoices">
+                            <div class="sub-invoices-head">
+                                <h4>Invoice History</h4>
+                                <span>Latest 10 charges from Stripe</span>
+                            </div>
+                            <table class="history-table" id="invoiceHistoryTable">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Status</th>
+                                        <th>Amount</th>
+                                        <th>Period End</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="5">No invoices yet</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                     <div class="prof-section" id="prof-history">
