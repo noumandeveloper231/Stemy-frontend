@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verify email — Stemy</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+
+<body
+  style="min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;background:var(--bg,#0a0a0f);color:var(--text,#f0f2f7);font-family:'DM Sans',system-ui,sans-serif;padding:1.5rem;">
+  <p id="verifyStatus" style="max-width:28rem;text-align:center;line-height:1.5;">Verifying…</p>
+  <script src="../js/config.js"></script>
+  <script>
+    (function () {
+      function apiBase() {
+        var c = window.STEMY_CONFIG || {};
+        return String(c.API_URL || 'http://localhost:3000/api').replace(/\/$/, '');
+      }
+      var el = document.getElementById('verifyStatus');
+      var p = new URLSearchParams(location.search);
+      var token = p.get('token');
+      var email = p.get('email');
+      if (!token || !email) {
+        el.textContent = 'This link is missing verification details. Open the link from your email, or paste the token on your account page after signing in.';
+        return;
+      }
+      fetch(apiBase() + '/auth/verify-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token, email: email }),
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (x.ok) {
+            el.textContent = 'Your email is verified. You can close this tab and return to Stemy.';
+          } else {
+            el.textContent = x.j.message || 'Verification failed. The link may have expired.';
+          }
+        })
+        .catch(function () {
+          el.textContent = 'Could not reach the server. Check your connection and API URL in client/js/config.js.';
+        });
+    })();
+  </script>
+</body>
+
+</html>
