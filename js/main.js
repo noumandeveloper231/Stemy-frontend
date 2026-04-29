@@ -3007,8 +3007,20 @@ async function openPayment(planLabel, _priceIgnored) {
     const modal = document.getElementById('paymentModal');
     if (modal) modal.classList.remove('active');
     try {
-        const { url } = await apiCall('/subscriptions/checkout', { method: 'POST', body: { plan } });
-        if (url) window.location.href = url;
+        const data = await apiCall('/subscriptions/checkout', { method: 'POST', body: { plan } });
+        if (data?.url) {
+            window.location.href = data.url;
+            return;
+        }
+        if (data?.updated) {
+            await refreshSession();
+            const pr = document.getElementById('page-profile');
+            if (pr) void populateProfile();
+            showToast(data.message || 'Subscription plan updated');
+            showPage('profile');
+            return;
+        }
+        showToast(data?.message || 'Subscription request completed');
     } catch (e) {
         showToast(e.message || 'Checkout failed');
     }
