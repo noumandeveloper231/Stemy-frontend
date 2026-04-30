@@ -5,7 +5,7 @@
  */
 window.STEMY_CONFIG = Object.assign(
   {
-    API_URL: "https://stemy-backend.onrender.com/api",
+    API_URL: "http://localhost:3000/api",
     GOOGLE_CLIENT_ID: "422382686287-k6bgl7hjjfjsrfsob71a7aql3jkvu6l2.apps.googleusercontent.com",
   },
   window.STEMY_CONFIG || {},

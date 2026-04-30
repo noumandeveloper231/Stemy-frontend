@@ -1817,7 +1817,22 @@ function routeForPage(name) {
     const map = window.STEMY_ROUTE_MAP || {};
     return map[name] || null;
 }
-function showPage(name) {
+function hasAuthToken() {
+    return Boolean(localStorage.getItem('esAuthToken'));
+}
+
+function canAccessPage(name, options = {}) {
+    const { silent = false } = options;
+    if (name !== 'profile') return true;
+    if (hasAuthToken()) return true;
+    if (!silent) showToast('Please log in to access your account');
+    return false;
+}
+
+function showPage(name, options = {}) {
+    if (!canAccessPage(name, options)) {
+        return showPage('login', { silent: true });
+    }
     const targetFile = routeForPage(name);
     if (targetFile) {
         const here = currentPageFile().toLowerCase();
@@ -1895,6 +1910,10 @@ function hasBillableSubscription(sub) {
     if (!sub?.plan || !sub.status) return false;
     if (sub.status === 'CANCELED') return false;
     return true;
+}
+
+function isCancellationScheduled(sub) {
+    return Boolean(sub?.cancelAtPeriodEnd) && hasBillableSubscription(sub);
 }
 
 /** Sidebar / card copy: DB default BASIC without a paid sub is shown as Free Plan. */
@@ -2044,7 +2063,7 @@ async function populateProfile() {
         const badge = subCard.querySelector('.sub-badge');
         if (badge) {
             badge.textContent = hasBillableSubscription(subscription)
-                ? subscriptionStatusLabel(subscription.status)
+                ? (isCancellationScheduled(subscription) ? 'Canceling' : subscriptionStatusLabel(subscription.status))
                 : 'Free';
         }
         const vals = subCard.querySelectorAll('.sub-detail-val');
@@ -2056,9 +2075,13 @@ async function populateProfile() {
         if (vals[2]) {
             const end = subscription?.currentPeriodEnd || subscription?.trialEndsAt;
             const daysLeft = daysUntil(end);
-            vals[2].textContent = typeof daysLeft === 'number'
-                ? `${Math.max(0, daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} left in current cycle`
-                : '—';
+            if (isCancellationScheduled(subscription) && end) {
+                vals[2].textContent = `Cancels on ${new Date(end).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+            } else {
+                vals[2].textContent = typeof daysLeft === 'number'
+                    ? `${Math.max(0, daysLeft)} day${Math.abs(daysLeft) === 1 ? '' : 's'} left in current cycle`
+                    : '—';
+            }
         }
         if (vals[3] && user?.createdAt) {
             vals[3].textContent = new Date(user.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -2068,8 +2091,10 @@ async function populateProfile() {
         if (notice) {
             if (!hasBillableSubscription(subscription)) {
                 notice.textContent = 'No paid subscription is currently active.';
+            } else if (isCancellationScheduled(subscription)) {
+                notice.textContent = 'Your plan is set to cancel at period end. You can resume it anytime before the date above.';
             } else if (subscription?.status === 'CANCELED') {
-                notice.textContent = 'Your plan is canceled. Access remains until the period end date above.';
+                notice.textContent = 'Your plan is canceled.';
             } else {
                 notice.textContent = 'Manage plan changes and cancellations in Stripe Billing Portal.';
             }
@@ -2106,6 +2131,8 @@ async function populateProfile() {
     if (emEl) {
         emEl.value = email !== '—' ? email : '';
         emEl.readOnly = true;
+        emEl.disabled = true;
+        emEl.title = 'Email cannot be changed';
     }
 
     const saveBtn = profSettings?.querySelector('.btn.btn-primary');
@@ -2127,9 +2154,9 @@ async function populateProfile() {
             <span class="email-verify-prompt-icon" aria-hidden="true">✉️</span>
             <div class="email-verify-prompt-text">
                 <strong>Verify your email</strong>
-                <span>We sent a link and token to your inbox. Open the link or paste the token here.</span>
+                <span>We sent a 6-digit OTP code to your inbox. Enter it to verify your email.</span>
             </div>
-            <button type="button" class="btn btn-primary" onclick="openEmailVerifyModal()">Enter verification token</button>
+            <button type="button" class="btn btn-primary" onclick="openEmailVerifyModal()">Enter OTP code</button>
         `;
         const main = profileRoot.querySelector('.profile-main');
         if (main) main.insertBefore(prompt, main.firstChild);
@@ -2143,11 +2170,17 @@ async function populateProfile() {
     if (plist) plist.innerHTML = '';
 
     const cancelPlan = profileRoot.querySelector('#prof-subscription button.btn-ghost[style*="warn"], #prof-subscription .sub-card button.btn-ghost[style*="warn"]');
-    if (cancelPlan && cancelPlan.textContent.includes('Cancel Plan') && !cancelPlan.dataset.stemyPortalBound) {
-        cancelPlan.dataset.stemyPortalBound = '1';
+    if (cancelPlan) {
+        if (isCancellationScheduled(subscription)) {
+            cancelPlan.textContent = "Don't cancel";
+            cancelPlan.style.color = 'var(--text)';
+        } else {
+            cancelPlan.textContent = 'Cancel Plan';
+            cancelPlan.style.color = 'var(--warn)';
+        }
         cancelPlan.onclick = (ev) => {
             ev.preventDefault();
-            void openBillingPortal();
+            void openBillingPortal(isCancellationScheduled(subscription) ? 'manage' : 'cancel');
         };
     }
 
@@ -2179,6 +2212,30 @@ async function uploadAvatar(input) {
     }
     const fd = new FormData();
     fd.append('avatar', file);
+    const avatarWrap = document.querySelector('.profile-sidebar .profile-avatar-wrap');
+    let uploadIndicator = null;
+    if (avatarWrap) {
+        avatarWrap.style.pointerEvents = 'none';
+        avatarWrap.style.opacity = '0.7';
+        avatarWrap.title = 'Uploading photo...';
+        avatarWrap.style.position = avatarWrap.style.position || 'relative';
+        uploadIndicator = document.createElement('div');
+        uploadIndicator.id = 'avatarUploadIndicator';
+        uploadIndicator.textContent = 'Uploading...';
+        uploadIndicator.style.position = 'absolute';
+        uploadIndicator.style.inset = '0';
+        uploadIndicator.style.display = 'flex';
+        uploadIndicator.style.alignItems = 'center';
+        uploadIndicator.style.justifyContent = 'center';
+        uploadIndicator.style.background = 'rgba(10, 16, 28, 0.72)';
+        uploadIndicator.style.backdropFilter = 'blur(2px)';
+        uploadIndicator.style.borderRadius = '12px';
+        uploadIndicator.style.color = 'var(--text)';
+        uploadIndicator.style.fontSize = '0.85rem';
+        uploadIndicator.style.fontWeight = '700';
+        uploadIndicator.style.letterSpacing = '0.02em';
+        avatarWrap.appendChild(uploadIndicator);
+    }
     try {
         const data = await apiCallMultipart('/users/me/avatar', fd);
         const userStr = localStorage.getItem('esUser');
@@ -2189,6 +2246,13 @@ async function uploadAvatar(input) {
         showToast('Photo updated');
     } catch (err) {
         showToast(err.message || 'Upload failed');
+    } finally {
+        if (avatarWrap) {
+            avatarWrap.style.pointerEvents = '';
+            avatarWrap.style.opacity = '';
+            avatarWrap.title = 'Click to change photo';
+        }
+        if (uploadIndicator) uploadIndicator.remove();
     }
     input.value = '';
 }
@@ -2270,6 +2334,23 @@ async function apiCallMultipart(endpoint, formData, method = 'POST') {
         throw new Error(data.message || 'Request failed');
     }
     return data;
+}
+
+function setButtonLoading(button, isLoading, loadingText) {
+    if (!button) return;
+    if (isLoading) {
+        if (!button.dataset.originalText) button.dataset.originalText = button.textContent || '';
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        if (loadingText) button.textContent = loadingText;
+        return;
+    }
+    button.disabled = false;
+    button.setAttribute('aria-busy', 'false');
+    if (button.dataset.originalText) {
+        button.textContent = button.dataset.originalText;
+        delete button.dataset.originalText;
+    }
 }
 
 async function refreshSession() {
@@ -2362,6 +2443,7 @@ async function doLogin(viaGoogle) {
     const passwordInput =
         document.getElementById('loginPassword') ||
         loginForm.querySelector('input[type="password"]');
+    const loginBtn = loginForm.querySelector('button[onclick="doLogin(false)"]');
 
     const email = emailInput ? emailInput.value.trim() : '';
     const password = passwordInput ? passwordInput.value : '';
@@ -2369,6 +2451,7 @@ async function doLogin(viaGoogle) {
     if (!email) { showToast('Please enter your email'); return; }
     if (!password) { showToast('Please enter your password'); return; }
 
+    setButtonLoading(loginBtn, true, 'Logging in...');
     try {
         const data = await apiCall('/auth/login', {
             method: 'POST',
@@ -2382,6 +2465,8 @@ async function doLogin(viaGoogle) {
         showPage('profile');
     } catch (err) {
         showToast(err.message || 'Login failed');
+    } finally {
+        setButtonLoading(loginBtn, false);
     }
 }
 
@@ -2396,6 +2481,7 @@ async function doSignup() {
     const lastInput = document.getElementById('signupLastName') || textInputs[1] || null;
     const emailInput = document.getElementById('signupEmail') || emailInputs[0] || null;
     const passwordInput = document.getElementById('signupPassword') || passwordInputs[0] || null;
+    const signupBtn = signupForm.querySelector('button[onclick="doSignup()"]');
 
     const first = firstInput ? firstInput.value.trim() : '';
     const last = lastInput ? lastInput.value.trim() : '';
@@ -2412,6 +2498,7 @@ async function doSignup() {
         return;
     }
 
+    setButtonLoading(signupBtn, true, 'Creating account...');
     try {
         const data = await apiCall('/auth/signup', {
             method: 'POST',
@@ -2438,6 +2525,8 @@ async function doSignup() {
         showPage('profile');
     } catch (err) {
         showToast(err.message || 'Signup failed');
+    } finally {
+        setButtonLoading(signupBtn, false);
     }
 }
 
@@ -2982,14 +3071,14 @@ function startStemMaster() {
 }
 
 // PAYMENT — Stripe Checkout / Customer Portal (server)
-async function openBillingPortal() {
+async function openBillingPortal(intent = 'manage') {
     if (!localStorage.getItem('esAuthToken')) {
         showToast('Log in first');
         showPage('login');
         return;
     }
     try {
-        const { url } = await apiCall('/subscriptions/portal', { method: 'POST', body: {} });
+        const { url } = await apiCall('/subscriptions/portal', { method: 'POST', body: { intent } });
         if (url) window.location.href = url;
     } catch (e) {
         showToast(e.message || 'Could not open billing portal');
@@ -3045,13 +3134,19 @@ function completePurchase() {
 function handleCheckoutReturn() {
     const p = new URLSearchParams(window.location.search);
     if (p.get('portal') === 'return') {
+        const intent = p.get('intent');
         refreshSession().then(() => {
-            showToast('Subscription synced from billing portal');
+            if (intent === 'cancel') {
+                showToast('Cancellation status synced');
+            } else {
+                showToast('Subscription synced from billing portal');
+            }
             showPage('profile');
             const pr = document.getElementById('page-profile');
             if (pr) void populateProfile();
         });
         p.delete('portal');
+        p.delete('intent');
         const next = `${window.location.pathname}${p.toString() ? `?${p.toString()}` : ''}`;
         window.history.replaceState({}, '', next);
         return;
@@ -3722,7 +3817,9 @@ async function saveProfileSettings() {
         showToast('First name is required');
         return;
     }
+    const saveBtn = document.querySelector('#prof-settings .btn.btn-primary');
 
+    setButtonLoading(saveBtn, true, 'Saving...');
     try {
         const data = await apiCall('/users/me', {
             method: 'PATCH',
@@ -3743,6 +3840,8 @@ async function saveProfileSettings() {
         showToast('Settings saved');
     } catch (err) {
         showToast(err.message || 'Failed to save settings');
+    } finally {
+        setButtonLoading(saveBtn, false);
     }
 }
 
@@ -3760,9 +3859,9 @@ function ensureEmailVerifyModal() {
             <button type="button" class="modal-close" onclick="closeEmailVerifyModal()" aria-label="Close">✕</button>
             <div class="email-verify-modal-icon" aria-hidden="true">✉️</div>
             <div class="modal-title" id="emailVerifyModalTitle">Verify your email</div>
-            <p class="modal-sub">Paste the token from your verification email, or open the link in that email in your browser.</p>
-            <label class="card-field-label" for="verifyOtpInput">Verification token</label>
-            <input class="card-field" type="text" id="verifyOtpInput" name="verification_token" placeholder="Paste token from email" maxlength="128" autocomplete="one-time-code" spellcheck="false">
+            <p class="modal-sub">Enter the 6-digit OTP code sent to your email address.</p>
+            <label class="card-field-label" for="verifyOtpInput">Verification OTP</label>
+            <input class="card-field" type="text" id="verifyOtpInput" name="verification_otp" placeholder="Enter 6-digit code" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" spellcheck="false">
             <div class="email-verify-modal-actions">
                 <button type="button" class="btn btn-primary btn-wide" onclick="verifyEmailOtp()">Verify email</button>
                 <button type="button" class="btn btn-ghost btn-wide" onclick="resendVerificationEmail()">Resend verification email</button>
@@ -3814,7 +3913,7 @@ async function resendVerificationEmail() {
             method: 'POST',
             body: { email: user.email }
         });
-        showToast('If your account needs verification, check your email for the link.');
+        showToast('If your account needs verification, check your email for the OTP code.');
     } catch (err) {
         showToast(err.message || 'Failed to send code');
     }
@@ -3822,10 +3921,11 @@ async function resendVerificationEmail() {
 
 async function verifyEmailOtp() {
     const otpInput = document.getElementById('verifyOtpInput');
-    const otp = otpInput ? otpInput.value.trim() : '';
+    const otp = otpInput ? otpInput.value.replace(/\D/g, '').trim() : '';
+    if (otpInput) otpInput.value = otp;
 
-    if (!otp || otp.length < 8) {
-        showToast('Paste the full verification token from your email');
+    if (!otp || otp.length !== 6) {
+        showToast('Enter the 6-digit OTP from your email');
         return;
     }
 
@@ -3838,7 +3938,7 @@ async function verifyEmailOtp() {
         }
         await apiCall('/auth/verify-email', {
             method: 'POST',
-            body: { token: otp, email: user.email },
+            body: { otp, email: user.email },
         });
         showToast('Email verified');
         closeEmailVerifyModal();
@@ -3855,5 +3955,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     handleCheckoutReturn();
     await loadCurrentUser();
     const pendingReset = applyPendingPasswordReset();
-    showPage(pendingReset ? 'login' : (window.STEMY_INITIAL_PAGE || 'home'));
+    showPage(pendingReset ? 'login' : (window.STEMY_INITIAL_PAGE || 'home'), { silent: true });
 });
